@@ -1535,6 +1535,15 @@ class TimelineView(updates.UpdateInterface, ViewClass):
 
         menu.addSeparator()
 
+        # AI Tools
+        if clip and self.window.ravi_api_url():
+            ravi_menu = StyledContextMenu(title=_("AI Tools"), parent=self)
+            ravi_submenu = StyledContextMenu(title=_("Ravi API"), parent=self)
+            generate_action = ravi_submenu.addAction(_("Generate Captions"))
+            generate_action.triggered.connect(partial(self.window.generate_ravi_captions_for_clip, clip_id))
+            ravi_menu.addMenu(ravi_submenu)
+            menu.addMenu(ravi_menu)
+
         # Alignment Menu (if multiple selections)
         if len(clip_ids) > 1:
             Alignment_Menu = StyledContextMenu(title=_("Align"), parent=self)

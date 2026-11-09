@@ -30,6 +30,7 @@ import os
 import operator
 import functools
 import platform
+import threading
 
 from qt_api import Qt, QSize, QDir, minimum_ui_scale
 from qt_api import (
@@ -37,6 +38,7 @@ from qt_api import (
     QVBoxLayout, QHBoxLayout, QSizePolicy,
     QScrollArea, QLabel, QLineEdit, QPushButton,
     QDoubleSpinBox, QComboBox, QSpinBox, QStyle,
+    QTimer,
 )
 from qt_api import QKeySequence, QIcon
 
@@ -47,6 +49,7 @@ from classes.distribution import is_snap
 from classes.language import get_all_languages
 from classes.logger import log
 from classes.metrics import track_metric_screen
+from classes.ravi_client import RaviClient
 from windows.toggle_switch import ToggleSwitch
 
 import openshot
@@ -307,12 +310,17 @@ class Preferences(QDialog):
                         extraWidget = QPushButton(_("Browse..."))
                         callback = self.selectFolder if param["type"] == "browse-folder" else self.selectExecutable
                         extraWidget.clicked.connect(functools.partial(callback, widget, param))
-                    elif param.get("setting") == "comfy-ui-url":
-                        # Add an explicit connectivity check for ComfyUI URL.
+                    elif param.get("setting") in ("comfy-ui-url", "ravi-api-url"):
+                        # Add an explicit connectivity check for AI service URL settings.
                         extraWidget = QPushButton(_("Check"))
-                        extraWidget.clicked.connect(
-                            functools.partial(self.check_comfy_ui_url, widget, param, extraWidget)
-                        )
+                        if param.get("setting") == "comfy-ui-url":
+                            extraWidget.clicked.connect(
+                                functools.partial(self.check_comfy_ui_url, widget, param, extraWidget)
+                            )
+                        else:
+                            extraWidget.clicked.connect(
+                                functools.partial(self.check_ravi_api_url, widget, param, extraWidget)
+                            )
 
                 elif param["type"] == "bool":
                     widget = ToggleSwitch()
@@ -896,6 +904,83 @@ class Preferences(QDialog):
 
         window.refresh_comfy_availability_async(timeout=2.0, callback=_handle_result)
 
+    def check_ravi_api_url(self, widget, param, btn=None):
+        _ = get_app()._tr
+        if btn and btn.property("ravi_check_pending"):
+            return
+        url = str(widget.text() or "").strip().rstrip("/")
+        if not url:
+            log.info("Ravi API URL check failed: empty URL")
+            self._update_ravi_api_check_button(
+                btn,
+                available=False,
+                tooltip=_("Ravi API URL is empty."),
+                enabled=True,
+            )
+            return
+
+        self.s.set(param["setting"], url)
+        widget.setText(url)
+        self._update_ravi_api_check_button(
+            btn,
+            available=False,
+            tooltip=_("Checking Ravi API connection..."),
+            enabled=True,
+            clear_icon=True,
+            pending=True,
+        )
+
+        thread = threading.Thread(
+            target=self._check_ravi_api_url_worker,
+            args=(url, widget, param, btn),
+            daemon=True,
+        )
+        thread.start()
+
+    def _check_ravi_api_url_worker(self, url, widget, param, btn):
+        available = False
+        error_text = ""
+        try:
+            RaviClient(url).ping(timeout=(2.0, 5.0))
+            available = True
+        except Exception as ex:
+            error_text = str(ex)
+        QTimer.singleShot(0, lambda: self._finish_ravi_api_url_check(widget, param, btn, available, error_text, url))
+
+    def _finish_ravi_api_url_check(self, widget, param, btn, available, error_text, checked_url):
+        if not btn:
+            return
+        _ = get_app()._tr
+        current_url = str(widget.text() or "").strip().rstrip("/")
+        if checked_url != current_url:
+            self._update_ravi_api_check_button(
+                btn,
+                available=False,
+                tooltip=_("Ravi API URL changed. Click Check to validate the new value."),
+                enabled=True,
+                clear_icon=True,
+                pending=False,
+            )
+            return
+        if available:
+            self._update_ravi_api_check_button(
+                btn,
+                available=True,
+                tooltip=_("Ravi API connection successful."),
+                enabled=True,
+                pending=False,
+            )
+            return
+
+        message = _("Connection failed: {}") if error_text else _("Connection failed.")
+        self._update_ravi_api_check_button(
+            btn,
+            available=False,
+            tooltip="{}".format(message.format(error_text) if error_text else message),
+            enabled=True,
+            pending=False,
+        )
+
     def _update_comfy_ui_check_button(self, btn, available, tooltip, enabled, clear_icon=False, pending=None):
         if not btn:
             return
@@ -910,6 +995,21 @@ class Preferences(QDialog):
         btn.setEnabled(bool(enabled))
         if pending is not None:
             btn.setProperty("comfy_check_pending", bool(pending))
+
+    def _update_ravi_api_check_button(self, btn, available, tooltip, enabled, clear_icon=False, pending=None):
+        if not btn:
+            return
+        if clear_icon:
+            btn.setIcon(QIcon())
+        else:
+            icon = self.style().standardIcon(
+                QStyle.SP_DialogApplyButton if available else QStyle.SP_DialogCancelButton
+            )
+            btn.setIcon(icon)
+        btn.setToolTip(str(tooltip or ""))
+        btn.setEnabled(bool(enabled))
+        if pending is not None:
+            btn.setProperty("ravi_check_pending", bool(pending))
 
     def dropdown_index_changed(self, widget, param, index):
         # Save setting

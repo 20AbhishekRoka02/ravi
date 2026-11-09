@@ -615,6 +615,14 @@
     "setting": "comfy-ui-url"
   },
   {
+    "value": "",
+    "title": "Ravi API URL",
+    "type": "text",
+    "restart": false,
+    "category": "Advanced",
+    "setting": "ravi-api-url"
+  },
+  {
     "value": false,
     "title": "User Interface Debug Logging",
     "type": "bool",

@@ -72,6 +72,7 @@ from classes.clipboard import ClipboardManager
 from classes.generation_queue import GenerationQueueManager
 from classes.generation_service import GenerationService
 from classes.proxy_service import ProxyService
+from classes.ravi_client import RaviCaptionService
 from classes.thumbnail import httpThumbnailServerThread, httpThumbnailException
 from classes.time_parts import secondsToTimecode
 from classes.timeline import TimelineSync
@@ -2682,6 +2683,23 @@ class MainWindow(AssetKeyboardMixin, updates.UpdateWatcher, QMainWindow):
 
     def actionGenerate_trigger(self, checked=True):
         self.generation_service.action_generate_trigger(checked=checked)
+
+    def ravi_api_url(self):
+        return RaviCaptionService.configured_url()
+
+    def generate_ravi_captions_for_clip(self, clip_id=None):
+        clip = Clip.get(id=clip_id) if clip_id else None
+        if clip is None:
+            QMessageBox.warning(self, "Ravi API", "Please select a valid timeline clip.")
+            return
+
+        try:
+            RaviCaptionService(self).generate_for_clip(clip)
+        except ValueError as ex:
+            QMessageBox.warning(self, "Ravi API", str(ex))
+        except Exception as ex:
+            log.error("Ravi caption generation failed: %s", ex, exc_info=True)
+            QMessageBox.warning(self, "Ravi API", "Failed to generate captions: {}".format(ex))
 
     def _on_generation_job_finished(self, job_id, status):
         self.generation_service.on_generation_job_finished(job_id, status)
